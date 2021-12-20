@@ -190,6 +190,15 @@ public class STPGExplicit extends MDPSimple implements STPG
 
 	// Accessors (for STPG)
 
+	// LP: added accessor for state owners
+	public List<Integer> getStateOwners(){
+		return stateOwners;
+	}
+	// LP: added accessor for transitions
+	public List<List<Distribution>> getTrans(){
+		return trans;
+	}
+
 	@Override
 	public int getPlayer(int s)
 	{
