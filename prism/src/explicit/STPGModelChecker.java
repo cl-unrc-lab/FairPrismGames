@@ -28,6 +28,7 @@
 package explicit;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -50,6 +51,8 @@ import prism.PrismUtils;
 import strat.BoundedRewardDeterministicStrategy;
 import strat.MemorylessDeterministicStrategy;
 import strat.StepBoundedDeterministicStrategy;
+import java.util.Arrays; // PC: added library
+import java.io.PrintWriter; // PC: ad
 
 /**
  * Explicit-state model checker for two-player stochastic games (STPGs).
@@ -997,7 +1000,7 @@ public class STPGModelChecker extends ProbModelChecker
 		long timer;
 		// LP: Calculate Upper Bound
 		upperBound = computeUpperBound((STPGExplicit)stpg, (SMGRewardsSimple)rewards, min1, min2);
-		mainLog.println("Upper Bound: "+ upperBound);
+		mainLog.println("Upper Bound Computed with Baier's Method: "+ upperBound);
 		// Are we generating an optimal adversary?
 		genAdv = exportAdv || generateStrategy;
 
@@ -1126,7 +1129,8 @@ public class STPGModelChecker extends ProbModelChecker
 			msg += "\nConsider using a different numerical method or increasing the maximum number of iterations";
 			throw new PrismException(msg);
 		}
-
+		//PC: print result
+		mainLog.println("Solution:"+Arrays.toString(soln));
 		// Store results/strategy
 		res = new ModelCheckerResult();
 		res.soln = soln;
@@ -1166,6 +1170,7 @@ public class STPGModelChecker extends ProbModelChecker
 		boolean genAdv, done;
 		long timer;
 
+		mainLog.println("init values:" + Arrays.toString(init));
 		// Are we generating an optimal adversary?
 		genAdv = exportAdv || generateStrategy;
 
@@ -1231,13 +1236,17 @@ public class STPGModelChecker extends ProbModelChecker
 		// Start iterations
 		iters = 0;
 		done = false;
+		
+		
 		while (!done && iters < maxIters) {
 			
-		        //mainLog.println(soln);
+		    //mainLog.println(soln);
+			//System.out.println(Arrays.toString(soln));
 			//mainLog.println(rewards);
 			//mainLog.println(min1);
 			//mainLog.println(min2);
-			//mainLog.println(soln2);
+			//mainLog.println(Arrays.toString(soln2));
+			//System.out.println(Arrays.toString(soln2));
 			//mainLog.println(unknown);
 			//mainLog.println(genAdv);
 			
@@ -1247,12 +1256,21 @@ public class STPGModelChecker extends ProbModelChecker
 
 			// Check termination
 			done = PrismUtils.doublesAreClose(soln, soln2, termCritParam, termCrit == TermCrit.ABSOLUTE);
+			//if (init != null){}
+			//	for (int k=0; k< stpg.getNumStates(); k++){
+			//			if (soln[k] < soln2[k]){
+			//			System.out.println("jump detected");		
+			//			//cdthrow new RuntimeException("jump detected");
+			//	}
+			//	System.out.println(Arrays.toString(soln2));
+			//}
+			
 			// Swap vectors for next iter
 			tmpsoln = soln;
 			soln = soln2;
 			soln2 = tmpsoln;
 		}
-
+		
 		// Finished value iteration
 		timer = System.currentTimeMillis() - timer;
 		if (verbosity >= 1) {
@@ -1280,6 +1298,8 @@ public class STPGModelChecker extends ProbModelChecker
 			msg += "\nConsider using a different numerical method or increasing the maximum number of iterations";
 			throw new PrismException(msg);
 		}
+        // print result
+		// mainLog.println(Arrays.toString(soln));
 
 		// Store results/strategy
 		res = new ModelCheckerResult();
@@ -1428,6 +1448,7 @@ public class STPGModelChecker extends ProbModelChecker
 			// next part
 			// in which "proper" zero rewards are used
 			init = res.soln;
+			mainLog.println("Upper Bound Computed by Prism" + Arrays.toString(init));
 
 			// Return the rewards to the original state
 			if (rewards instanceof MDPRewardsSimple) {
@@ -1684,7 +1705,7 @@ public class STPGModelChecker extends ProbModelChecker
 		// Transform stpg into simple mdp
 		LinkedList<List<Distribution>> originalTrans = new LinkedList<List<Distribution>>();
 		for (int i = 0; i < stpg.getNumStates(); i++){
-			if (stpg.stateOwners.get(i) == 1 && min1 || stpg.stateOwners.get(i) == 2 && min2){ // replace minimizer actions for a unique distribution
+			if (stpg.stateOwners.get(i) == 2){//((stpg.stateOwners.get(i) == 1 && min1) || (stpg.stateOwners.get(i) == 2 && min2)){ // replace minimizer actions for a unique distribution
 				List<Distribution> act = stpg.getTrans().get(i);
 				originalTrans.add(act); // for restoring the original transitions later
 				stpg.getTrans().set(i,new LinkedList<Distribution>());
@@ -1698,7 +1719,6 @@ public class STPGModelChecker extends ProbModelChecker
 				stpg.getTrans().get(i).add(uniformDist);
 			}
 		}
-
 		// Compute strongly connected components (SCCs)
 		SCCConsumerStore sccStore = new SCCConsumerStore();
 		SCCComputer sccComputer = SCCComputer.createSCCComputer(this, stpg, sccStore);
@@ -1748,40 +1768,218 @@ public class STPGModelChecker extends ProbModelChecker
 	    		}
 	    	}
 	    }
-	    /*for (int t = 0; t < numSCCs; t++){
+	    for (int t = 0; t < numSCCs; t++){
 	    	mainLog.println("p."+t+": "+p[t]);
 	        mainLog.println("q."+t+": "+q[t]);
 	        mainLog.println("sz."+t+": "+sizes[t]);
-	    }*/
+	    }
+		//we compute de Z's
+
+		// we compute the zetas:
+		double[] zeta = new double[stpg.getNumStates()];
+		for (int i = 0; i < stpg.getNumStates(); i++){
+			for (int t = 0; t < numSCCs; t++){ // this can be improved using another array
+				BitSet scc = sccs.get(t);
+				if (scc.get(i)){
+					zeta[i] = 1/(Math.pow(p[t],sizes[t]-1) * (1-q[t])); // the zeta is the same for any starting state
+					break;
+				}
+			}
+		}
+		mainLog.println("zetas: "+ Arrays.toString(zeta));
+
+		res = 0;
+		for (int i = 0; i < stpg.getNumStates(); i++){
+			res += zeta[i] * rew.getStateRewards().get(i);
+		}
+	
+
 	    // Calculate upper bound
+		/*
 	    for (int i = 0; i < stpg.getNumStates(); i++){
 	        for (int t = 0; t < numSCCs; t++){
-	        	
 	    		BitSet scc = sccs.get(t);
 	        	if (scc.get(i)){
 	        		double recurrence = 1/(Math.pow(p[t],sizes[t]-1) * (1-q[t]));
-	        		/*double maxReward = 0;
-	        		for (Distribution d : stpg.getTrans().get(i)){
-	        			for (Integer s : d.getSupport()){
-	        				if (rew.getStateRewards().get(s) > maxReward)
-	        					maxReward = rew.getStateRewards().get(s);
-	        			}
-	        		}*/
-		    		//res += recurrence * maxReward;
 		    		res += recurrence * rew.getStateRewards().get(i);
 	        	}	    	
 		    }
 	    }
-	    
+	    */
+		mainLog.println("Upper Bound V2:");
+		//stpg.exportToDotFile(filename);
+		computeUpperBoundV2(stpg, rew, min1, min2);
+		//Restore original transitions
+		for (int i = 0; i < stpg.getNumStates(); i++){
+			if (stpg.stateOwners.get(i) == 2){//(stpg.stateOwners.get(i) == 1 && min1 || stpg.stateOwners.get(i) == 2 && min2)
+				stpg.getTrans().set(i,originalTrans.removeFirst());
+			}
+		}
+		
+		return res;
+	}
 
+	/**
+	* Compute upperBound for initial GFP value Iteration solution
+	* LP : This methods implements Baier's upper bound computation second version
+	*/
+	private double[] computeUpperBoundV2(STPGExplicit stpg, SMGRewardsSimple rew, boolean min1, boolean min2) throws PrismException{
+		
+		/*
+		// Transform stpg into simple mdp
+		LinkedList<List<Distribution>> originalTrans = new LinkedList<List<Distribution>>();
+		for (int i = 0; i < stpg.getNumStates(); i++){
+			if ((stpg.stateOwners.get(i) == 1 && min1) || (stpg.stateOwners.get(i) == 2 && min2)){ // replace minimizer actions for a unique distribution
+				List<Distribution> act = stpg.getTrans().get(i);
+				originalTrans.add(act); // for restoring the original transitions later
+				stpg.getTrans().set(i,new LinkedList<Distribution>());
+				Distribution uniformDist = new Distribution();
+				for (Distribution d : act){
+					for (Integer s : d.getSupport()){
+						if (d.get(s) > 0)
+							uniformDist.set(s,d.get(s)/act.size());
+					}
+				}
+				stpg.getTrans().get(i).add(uniformDist);
+			}
+		}
+		*/
+		for (int i=0; i< stpg.getNumStates(); i++){
+			mainLog.println("state "+i+" owner"+stpg.stateOwners.get(i));
+			mainLog.println("minimizer:"+(min1?"1":"2"));
+		}
+		double[] res = new double[stpg.getNumStates()];
+		
+		BitSet finalStates = new BitSet(stpg.getNumStates());
+		
+		// final states are those which only have them as successors
+		for (int i=0; i< stpg.getNumStates(); i++){
+			// we compute the succesors
+			BitSet succs = new BitSet(stpg.getNumStates());
+			for (int j=0; j< stpg.getNumStates(); j++){
+				for (Distribution dist : stpg.getTrans().get(i)){
+					if (dist.get(j)>0)
+						succs.set(j);
+				}
+			}	
+			if (succs.get(i) && succs.cardinality() == 1)
+				finalStates.set(i);
+		}
+		mainLog.println("final states:"+finalStates.toString());
+		// we compute the Ti's
+		LinkedList<BitSet> ts = new LinkedList<BitSet>();
+		// initial T0
+		BitSet init = new BitSet(stpg.getNumStates()); // T_0
+		init.or(finalStates); // the final states are added
+		ts.add(init);
+		BitSet S = new BitSet(stpg.getNumStates());
+		S.set(0,stpg.getNumStates(),true); // S contains all the states
+		while (true){
+			BitSet S0 = (BitSet) S.clone();
+			S0.andNot(ts.getLast());// the complement with the last T: S_i= S_{i-1} \ T
+			BitSet S1 = new BitSet(stpg.getNumStates());
+			for (int i=0; i<stpg.getNumStates();i++){
+				if (S0.get(i) && uniformSuccsIn(stpg, i, ts.getLast(), min1, min2))
+					S1.set(i);
+			}
+			//S = S1;
+			BitSet T = (BitSet) ts.getLast().clone();
+			T.or(S1);
+			if (T.equals(ts.getLast()))
+				break;
+			ts.addLast(T);
+		}
+		mainLog.println("ts:"+ts.toString());
+		// we compute the SCCS
+		// Compute strongly connected components (SCCs)
+		SCCConsumerStore sccStore = new SCCConsumerStore();
+		SCCComputer sccComputer = SCCComputer.createSCCComputer(this, stpg, sccStore);
+		sccComputer.computeSCCs();
+		List<BitSet> sccs = sccStore.getSCCs();
+		BitSet notInAnySCCs = sccStore.getNotInSCCs();
+		// Consider singletons as SCCs
+		for (int i = 0; i < stpg.getNumStates(); i++){
+			if (notInAnySCCs.get(i)){
+				BitSet bs = new BitSet(stpg.getNumStates());
+				bs.set(i);
+				sccs.add(bs);
+			}
+		}
+		int numSCCs = sccs.size();
+		//mainLog.println("not in any sccs: "+notInAnySCCs);
+
+		// we store in an array the SCC corresponding to each state, i.e., whichSCC[i] returns which is the SCC of state i
+		int[] whichSCC = new int[stpg.getNumStates()];
+		for (int i = 0; i<sccs.size();i++){
+			for (int j=0; j<stpg.getNumStates(); j++){
+				if (sccs.get(i).get(j))
+					whichSCC[j] = i; // the corresponding scc was found
+			}
+		}
+
+		// now we compute the ds
+		// the terminal states are easy
+		double[] d = new double[stpg.getNumStates()];
+		for (int i=0; i < stpg.getNumStates(); i++){
+			if (finalStates.get(i))
+				d[i] = 1;
+		}
+		for (int i=1; i<ts.size(); i++){
+			for (int j=0; j<stpg.getNumStates(); j++){
+				if (ts.get(i).get(j)){ // if the state is in T_i
+					d[j] = Double.POSITIVE_INFINITY;
+					for (Distribution dist : stpg.getTrans().get(j)){ // for each choice in that state
+						for (int k=0; k<stpg.getNumStates(); k++){
+							if (dist.get(k) > 0 && ts.get(i-1).get(k)){
+								double dut = whichSCC[j] != whichSCC[k]?1:d[k];
+								d[j] = Math.min(d[j], dist.get(k) * dut);
+							}
+						}
+					}
+				}
+			}
+		}
+		// now we compute de zetas
+		double[] zetas = new double[stpg.getNumStates()];
+		for (int i=0; i< stpg.getNumStates(); i++){
+			zetas[i] = 1/d[i];
+		}
+		/*
 		//Restore original transitions
 		for (int i = 0; i < stpg.getNumStates(); i++){
 			if (stpg.stateOwners.get(i) == 1 && min1 || stpg.stateOwners.get(i) == 2 && min2)
 				stpg.getTrans().set(i,originalTrans.removeFirst());
 		}
-
-		return res;
+		*/
+		double upperBoundV2 = 0;
+		for (int i=0; i<stpg.getNumStates(); i++){
+			upperBoundV2 += rew.getStateRewards().get(i)* zetas[i];
+		}
+		for (int i : stpg.getInitialStates()){
+			mainLog.println("initial state:"+ i);
+		}
+		mainLog.println("zetas V2:"+Arrays.toString(zetas));
+		mainLog.println("Upper Bound with Baier's Method V2:"+upperBoundV2);
+		return null;
 	}
+
+	/**
+	 * It says if from a state we can reach a set of states for any possible choice
+	 */
+	private boolean uniformSuccsIn(STPGExplicit stpg, int k, BitSet s, boolean min1, boolean min2){
+		boolean result = true;
+		
+		for (Distribution dist : stpg.getTrans().get(k)){
+			mainLog.println("state:"+k);
+			mainLog.println("dist:"+dist.toString());
+			mainLog.println("result:"+dist.containsOneOf(s));
+			if (!dist.containsOneOf(s)) // we found a distribution that does not contain a succ in S
+				return false;
+		}
+
+		return result;
+	}
+
 
 	/**
 	 * Computes the reachability reward under the semantics where nonreaching
