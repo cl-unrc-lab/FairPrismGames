@@ -963,6 +963,10 @@ public class STPGModelChecker extends ProbModelChecker
 	public ModelCheckerResult computeReachRewards(STPG stpg, STPGRewards rewards, BitSet target, boolean min1, boolean min2, double init[], BitSet known,
 			int unreachingSemantics) throws PrismException
 	{
+		boolean suf = false;
+		STPGExplicit stpge = (STPGExplicit) stpg;
+		suf = stpge.stoppingUnderFairness(target);
+		mainLog.println("STOPPING UNDER FAIRNESS?: "+ suf);
 		switch (unreachingSemantics) {
 		case R_INFINITY:
 			return computeReachRewardsInfinity(stpg, rewards, target, min1, min2, init, known);
@@ -1000,8 +1004,8 @@ public class STPGModelChecker extends ProbModelChecker
 		long timer;
 		// LP: Calculate Upper Bound
 		//upperBound = computeUpperBound((STPGExplicit)stpg, (SMGRewardsSimple)rewards, min1, min2);
-		upperBound = computeUpperBoundV2((STPGExplicit)stpg, (SMGRewardsSimple)rewards, min1, min2);
-		mainLog.println("Upper Bound Computed with Baier's Method: "+ upperBound);
+		init = computeUpperBound((STPGExplicit)stpg, (SMGRewardsSimple) rewards);
+		mainLog.println("Upper Bound Computed with Baier's Method: "+ Arrays.toString(init));
 		// Are we generating an optimal adversary?
 		genAdv = exportAdv || generateStrategy;
 
@@ -1031,7 +1035,7 @@ public class STPGModelChecker extends ProbModelChecker
 			}
 		} else {*/
 			for (i = 0; i < n; i++){
-				soln[i] = soln2[i] = target.get(i) ? 0.0 : upperBound;
+				soln[i] = soln2[i] = target.get(i) ? 0.0 : init[i];
 				//soln[i] = soln2[i] = target.get(i) ? 0.0 : ub[i];
 			}
 		//}
@@ -1092,8 +1096,8 @@ public class STPGModelChecker extends ProbModelChecker
 			// PC: we avoid overflow with these lines
 			
 			for (i=0;i<n;i++){
-				if (soln2[i] > upperBound){
-					soln2[i] = Double.min(soln2[i], upperBound);
+				if (soln2[i] > init[i]){
+					soln2[i] = Double.min(soln2[i], init[i]);
 					done = false; // PC: we need to avoid worng stopping since this modification
 				}
 			}
@@ -1702,7 +1706,101 @@ public class STPGModelChecker extends ProbModelChecker
 	* Compute upperBound for initial GFP value Iteration solution
 	* LP : This methods implements Baier's upper bound computation
 	*/
-	private double computeUpperBound(STPGExplicit stpg, SMGRewardsSimple rew, boolean min1, boolean min2) throws PrismException{
+	private double[] computeUpperBound(STPGExplicit stpg, SMGRewardsSimple rew) throws PrismException{
+		// Transform stpg into simple mdp
+		LinkedList<List<Distribution>> originalTrans = new LinkedList<List<Distribution>>();
+		for (int i = 0; i < stpg.getNumStates(); i++){
+			if (stpg.stateOwners.get(i) == 2){ // replace minimizer actions for a unique distribution
+				List<Distribution> act = stpg.getTrans().get(i);
+				originalTrans.add(act); // for restoring the original transitions later
+				stpg.getTrans().set(i,new LinkedList<Distribution>());
+				Distribution uniformDist = new Distribution();
+				for (Distribution d : act){
+					for (Integer s : d.getSupport()){
+						if (d.get(s) > 0)
+							uniformDist.set(s,d.get(s)/act.size());
+					}
+				}
+				stpg.getTrans().get(i).add(uniformDist);
+			}
+		}
+
+		// Compute strongly connected components (SCCs)
+		SCCConsumerStore sccStore = new SCCConsumerStore();
+		SCCComputer sccComputer = SCCComputer.createSCCComputer(this, stpg, sccStore);
+		sccComputer.computeSCCs();
+		List<BitSet> sccs = sccStore.getSCCs();
+		BitSet notInAnySCCs = sccStore.getNotInSCCs();
+		// Consider singletons as SCCs
+		for (int i = 0; i < stpg.getNumStates(); i++){
+			if (notInAnySCCs.get(i)){
+				BitSet bs = new BitSet(stpg.getNumStates());
+				bs.set(i);
+				sccs.add(bs);
+			}
+		}
+		int numSCCs = sccs.size();
+		//mainLog.println("not in any sccs: "+notInAnySCCs);
+		mainLog.println("num sccs: "+numSCCs);
+
+		// Baier's upper Bound computation
+	    double[] q = new double[numSCCs];
+	    double[] p = new double[numSCCs];
+	    int[] sizes = new int[numSCCs];
+	    for (int t = 0; t < numSCCs; t++){
+	    	BitSet scc = sccs.get(t);
+	    	mainLog.println("scc: "+scc);
+	    	q[t] = 0;
+	    	p[t] = 1;
+	    	sizes[t] = scc.cardinality();
+	    	for (int i = 0; i < stpg.getNumStates(); i++){
+	    		if (scc.get(i)){
+	    			double maxProbCandidate;
+	    			List<Distribution> act = stpg.getTrans().get(i);
+	    			for (Distribution d : act){
+	    				maxProbCandidate = 0;
+	    				for (Integer s : d.getSupport()){
+	    					if (scc.get(s)){
+	    						maxProbCandidate += d.get(s);
+	    						if (d.get(s) < p[t] && d.get(s)>0){
+	    							p[t] = d.get(s);
+	    						}
+	    					}
+	    				}
+	    				if (maxProbCandidate > q[t] && maxProbCandidate < 1){
+	    					q[t] = maxProbCandidate;
+	    				}
+	    			}
+	    		}
+	    	}
+	    }
+	    // Calculate upper bound
+	    double[] res = new double[stpg.getNumStates()];
+	    for (int i = 0; i < stpg.getNumStates(); i++){
+	    	double initValue = 0;
+	    	LinkedList<Integer> reachable = stpg.getReachableFrom(i);
+	    	for (Integer j : reachable){
+		        for (int t = 0; t < numSCCs; t++){
+		    		BitSet scc = sccs.get(t);
+		        	if (scc.get(j)){
+		        		double recurrence = 1/(Math.pow(p[t],sizes[t]-1) * (1-q[t]));
+			    		initValue += recurrence * rew.getStateRewards().get(j);
+		        	}	    	
+			    }
+			}
+			res[i] = initValue;
+	    }
+	    
+
+		//Restore original transitions
+		for (int i = 0; i < stpg.getNumStates(); i++){
+			if (stpg.stateOwners.get(i) == 2)
+				stpg.getTrans().set(i,originalTrans.removeFirst());
+		}
+
+		return res;
+	}
+	/*private double computeUpperBound(STPGExplicit stpg, SMGRewardsSimple rew, boolean min1, boolean min2) throws PrismException{
 		double res = 0;
 		// Transform stpg into simple mdp
 		LinkedList<List<Distribution>> originalTrans = new LinkedList<List<Distribution>>();
@@ -1797,17 +1895,7 @@ public class STPGModelChecker extends ProbModelChecker
 	
 
 	    // Calculate upper bound
-		/*
-	    for (int i = 0; i < stpg.getNumStates(); i++){
-	        for (int t = 0; t < numSCCs; t++){
-	    		BitSet scc = sccs.get(t);
-	        	if (scc.get(i)){
-	        		double recurrence = 1/(Math.pow(p[t],sizes[t]-1) * (1-q[t]));
-		    		res += recurrence * rew.getStateRewards().get(i);
-	        	}	    	
-		    }
-	    }
-	    */
+
 		mainLog.println("Upper Bound V2:");
 		//stpg.exportToDotFile(filename);
 		computeUpperBoundV2(stpg, rew, min1, min2);
@@ -1819,7 +1907,7 @@ public class STPGModelChecker extends ProbModelChecker
 		}
 		
 		return res;
-	}
+	}*/
 
 	/**
 	* Compute upperBound for initial GFP value Iteration solution
