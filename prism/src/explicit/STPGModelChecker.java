@@ -999,7 +999,8 @@ public class STPGModelChecker extends ProbModelChecker
 		boolean genAdv, done;
 		long timer;
 		// LP: Calculate Upper Bound
-		upperBound = computeUpperBound((STPGExplicit)stpg, (SMGRewardsSimple)rewards, min1, min2);
+		//upperBound = computeUpperBound((STPGExplicit)stpg, (SMGRewardsSimple)rewards, min1, min2);
+		upperBound = computeUpperBoundV2((STPGExplicit)stpg, (SMGRewardsSimple)rewards, min1, min2);
 		mainLog.println("Upper Bound Computed with Baier's Method: "+ upperBound);
 		// Are we generating an optimal adversary?
 		genAdv = exportAdv || generateStrategy;
@@ -1029,9 +1030,10 @@ public class STPGModelChecker extends ProbModelChecker
 					soln[i] = soln2[i] = target.get(i) ? 0.0 : init[i];
 			}
 		} else {*/
-			for (i = 0; i < n; i++)
+			for (i = 0; i < n; i++){
 				soln[i] = soln2[i] = target.get(i) ? 0.0 : upperBound;
-				//soln[i] = soln2[i] = target.get(i) ? 0.0 : inf.get(i) ? Double.POSITIVE_INFINITY : 0.0;
+				//soln[i] = soln2[i] = target.get(i) ? 0.0 : ub[i];
+			}
 		//}
 
 		// Determine set of states actually need to compute values for
@@ -1823,9 +1825,9 @@ public class STPGModelChecker extends ProbModelChecker
 	* Compute upperBound for initial GFP value Iteration solution
 	* LP : This methods implements Baier's upper bound computation second version
 	*/
-	private double[] computeUpperBoundV2(STPGExplicit stpg, SMGRewardsSimple rew, boolean min1, boolean min2) throws PrismException{
+	private double computeUpperBoundV2(STPGExplicit stpg, SMGRewardsSimple rew, boolean min1, boolean min2) throws PrismException{
 		
-		/*
+		
 		// Transform stpg into simple mdp
 		LinkedList<List<Distribution>> originalTrans = new LinkedList<List<Distribution>>();
 		for (int i = 0; i < stpg.getNumStates(); i++){
@@ -1843,7 +1845,7 @@ public class STPGModelChecker extends ProbModelChecker
 				stpg.getTrans().get(i).add(uniformDist);
 			}
 		}
-		*/
+		
 		for (int i=0; i< stpg.getNumStates(); i++){
 			mainLog.println("state "+i+" owner"+stpg.stateOwners.get(i));
 			mainLog.println("minimizer:"+(min1?"1":"2"));
@@ -1944,13 +1946,9 @@ public class STPGModelChecker extends ProbModelChecker
 		for (int i=0; i< stpg.getNumStates(); i++){
 			zetas[i] = 1/d[i];
 		}
-		/*
-		//Restore original transitions
-		for (int i = 0; i < stpg.getNumStates(); i++){
-			if (stpg.stateOwners.get(i) == 1 && min1 || stpg.stateOwners.get(i) == 2 && min2)
-				stpg.getTrans().set(i,originalTrans.removeFirst());
-		}
-		*/
+		
+		
+		// tha should be only the reachable states
 		double upperBoundV2 = 0;
 		for (int i=0; i<stpg.getNumStates(); i++){
 			upperBoundV2 += rew.getStateRewards().get(i)* zetas[i];
@@ -1958,9 +1956,15 @@ public class STPGModelChecker extends ProbModelChecker
 		for (int i : stpg.getInitialStates()){
 			mainLog.println("initial state:"+ i);
 		}
-		mainLog.println("zetas V2:"+Arrays.toString(zetas));
+		//mainLog.println("zetas V2:"+Arrays.toString(zetas));
 		mainLog.println("Upper Bound with Baier's Method V2:"+upperBoundV2);
-		return null;
+		
+		//Restore original transitions
+		for (int i = 0; i < stpg.getNumStates(); i++){
+			if (stpg.stateOwners.get(i) == 1 && min1 || stpg.stateOwners.get(i) == 2 && min2)
+				stpg.getTrans().set(i,originalTrans.removeFirst());
+		}
+		return upperBoundV2;
 	}
 
 	/**
