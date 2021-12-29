@@ -1004,8 +1004,11 @@ public class STPGModelChecker extends ProbModelChecker
 		long timer;
 		// LP: Calculate Upper Bound
 		//upperBound = computeUpperBound((STPGExplicit)stpg, (SMGRewardsSimple)rewards, min1, min2);
-		init = computeUpperBound((STPGExplicit)stpg, (SMGRewardsSimple) rewards);
-		mainLog.println("Upper Bound Computed with Baier's Method: "+ Arrays.toString(init));
+		//mainLog.println("Baiers Second Upper Bound:"+Arrays.toString(computeUpperBoundV2((STPGExplicit)stpg, (SMGRewardsSimple)rewards, min1, min2)));
+		//init = computeUpperBound((STPGExplicit)stpg, (SMGRewardsSimple) rewards);
+		// we use the second method for computing the upper bound
+		init = computeUpperBoundV2((STPGExplicit)stpg, (SMGRewardsSimple)rewards, min1, min2);
+		//mainLog.println("Upper Bound Computed with Baier's Method: "+ Arrays.toString(init));
 		// Are we generating an optimal adversary?
 		genAdv = exportAdv || generateStrategy;
 
@@ -1911,11 +1914,13 @@ public class STPGModelChecker extends ProbModelChecker
 
 	/**
 	* Compute upperBound for initial GFP value Iteration solution
-	* LP : This methods implements Baier's upper bound computation second version
+	* LP : This method implements Baier's upper bound computation, Second Version
+	* Ussually the number obtained with this version are tighter
 	*/
-	private double computeUpperBoundV2(STPGExplicit stpg, SMGRewardsSimple rew, boolean min1, boolean min2) throws PrismException{
+	private double[] computeUpperBoundV2(STPGExplicit stpg, SMGRewardsSimple rew, boolean min1, boolean min2) throws PrismException{
 		
-		
+		// a variable for the result
+		double[] res = new double[stpg.getNumStates()];
 		// Transform stpg into simple mdp
 		LinkedList<List<Distribution>> originalTrans = new LinkedList<List<Distribution>>();
 		for (int i = 0; i < stpg.getNumStates(); i++){
@@ -1938,7 +1943,6 @@ public class STPGModelChecker extends ProbModelChecker
 			mainLog.println("state "+i+" owner"+stpg.stateOwners.get(i));
 			mainLog.println("minimizer:"+(min1?"1":"2"));
 		}
-		double[] res = new double[stpg.getNumStates()];
 		
 		BitSet finalStates = new BitSet(stpg.getNumStates());
 		
@@ -1980,6 +1984,7 @@ public class STPGModelChecker extends ProbModelChecker
 			ts.addLast(T);
 		}
 		mainLog.println("ts:"+ts.toString());
+
 		// we compute the SCCS
 		// Compute strongly connected components (SCCs)
 		SCCConsumerStore sccStore = new SCCConsumerStore();
@@ -2006,7 +2011,6 @@ public class STPGModelChecker extends ProbModelChecker
 					whichSCC[j] = i; // the corresponding scc was found
 			}
 		}
-
 		// now we compute the ds
 		// the terminal states are easy
 		double[] d = new double[stpg.getNumStates()];
@@ -2029,30 +2033,35 @@ public class STPGModelChecker extends ProbModelChecker
 				}
 			}
 		}
-		// now we compute de zetas
+
+		// now, we compute de zetas
 		double[] zetas = new double[stpg.getNumStates()];
 		for (int i=0; i< stpg.getNumStates(); i++){
 			zetas[i] = 1/d[i];
 		}
 		
-		
-		// tha should be only the reachable states
+		// this should be only the reachable states
 		double upperBoundV2 = 0;
 		for (int i=0; i<stpg.getNumStates(); i++){
-			upperBoundV2 += rew.getStateRewards().get(i)* zetas[i];
+			res[i] = 0;
+			// we calculate the reachable set
+			LinkedList<Integer> reachable = stpg.getReachableFrom(i);
+	    	for (Integer j : reachable){
+				res[i] += rew.getStateRewards().get(j)* zetas[j];
+			}
 		}
-		for (int i : stpg.getInitialStates()){
-			mainLog.println("initial state:"+ i);
-		}
+		//for (int i : stpg.getInitialStates()){
+		//	mainLog.println("initial state:"+ i);
+		//}
 		//mainLog.println("zetas V2:"+Arrays.toString(zetas));
-		mainLog.println("Upper Bound with Baier's Method V2:"+upperBoundV2);
+		mainLog.println("Upper Bound with Baier's Method V2:"+res);
 		
 		//Restore original transitions
 		for (int i = 0; i < stpg.getNumStates(); i++){
 			if (stpg.stateOwners.get(i) == 1 && min1 || stpg.stateOwners.get(i) == 2 && min2)
 				stpg.getTrans().set(i,originalTrans.removeFirst());
 		}
-		return upperBoundV2;
+		return res;
 	}
 
 	/**
@@ -2068,7 +2077,6 @@ public class STPGModelChecker extends ProbModelChecker
 			if (!dist.containsOneOf(s)) // we found a distribution that does not contain a succ in S
 				return false;
 		}
-
 		return result;
 	}
 
